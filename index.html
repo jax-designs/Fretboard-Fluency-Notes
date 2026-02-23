@@ -2,36 +2,125 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Random Note Generator</title>
+    <title>AI Fretboard Trainer</title>
     <style>
-        body { font-family: 'Times New Roman', Times, serif; text-align: center; margin-top: 100px; }
-        #display { font-size: 48px; margin: 40px; font-weight: bold; }
-        button { padding: 20px 40px; font-size: 32px; cursor: pointer; }
+        body { font-family: 'Segoe UI', sans-serif; text-align: center; background: #1a1a1a; color: white; padding-top: 50px; }
+        #display { font-size: 48px; margin: 20px; color: #00ffcc; }
+        #status { color: #888; margin-bottom: 20px; }
+        button { padding: 15px 30px; font-size: 18px; cursor: pointer; border-radius: 8px; border: none; background: #00ffcc; color: #1a1a1a; font-weight: bold; }
+        .detected { color: #ffcc00; font-size: 20px; }
     </style>
 </head>
 <body>
 
-    <h2>Guitar Practice Generator</h2>
-    
-    <div id="display">Press the button to start</div>
-    
-    <button onclick="generate()">Generate Note</button>
+    <h2>Play the Note:</h2>
+    <div id="display">Press Start</div>
+    <div id="status">Microphone: Off</div>
+    <div class="detected">Detected Note: <span id="currentNote">-</span></div>
+    <br>
+    <button id="startBtn" onclick="initAudio()">Start Listening</button>
 
     <script>
-        const notes = ["C", "C#", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
-        const strings = ["First string", "Second string", "Third string", "Fourth string", "Fifth string", "Sixth string"];
+        const notes = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+        const strings = ["1st String (e)", "2nd String (B)", "3rd String (G)", "4th String (D)", "5th String (A)", "6th String (E)"];
+        
+        let targetNote = "";
+        let audioContext;
+        let analyser;
+        let dataArray;
+        let isListening = false;
 
-        function generate() {
-            // JavaScript's way of picking a random item
-            const randomNote = notes[Math.floor(Math.random() * notes.length)];
+        function nextChallenge() {
+            targetNote = notes[Math.floor(Math.random() * notes.length)];
             const randomString = strings[Math.floor(Math.random() * strings.length)];
+            document.getElementById('display').innerHTML = `${targetNote} <br> <small style="font-size:20px">on ${randomString}</small>`;
+        }
 
-            // Display the result in the 'display' div
-            document.getElementById('display').innerHTML = 
-                `${randomString}<br>${randomNote}`;
+        async function initAudio() {
+            if (isListening) return;
+            
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const source = audioContext.createMediaStreamSource(stream);
+            
+            analyser = audioContext.createAnalyser();
+            analyser.fftSize = 2048;
+            source.connect(analyser);
+            
+            dataArray = new Float32Array(analyser.fftSize);
+            isListening = true;
+            document.getElementById('status').innerText = "Microphone: ON (Listening...)";
+            document.getElementById('startBtn').style.display = "none";
+            
+            nextChallenge();
+            updatePitch();
+        }
+
+        function updatePitch() {
+            analyser.getFloatTimeDomainData(dataArray);
+            let freq = autoCorrelate(dataArray, audioContext.sampleRate);
+
+            if (freq !== -1) {
+                let noteFound = getNoteFromFrequency(freq);
+                document.getElementById('currentNote').innerText = noteFound;
+
+                // Logic: If the played note matches the target, move to the next
+                if (noteFound === targetNote) {
+                    document.getElementById('display').style.color = "#00ff00"; // Flash green
+                    setTimeout(() => {
+                        document.getElementById('display').style.color = "#00ffcc";
+                        nextChallenge();
+                    }, 500); 
+                }
+            }
+            requestAnimationFrame(updatePitch);
+        }
+
+        function getNoteFromFrequency(frequency) {
+            // Standard formula: n = 12 * log2(f / 440) + 69
+            const n = Math.round(12 * Math.log2(frequency / 440)) + 69;
+            return notes[n % 12];
+        }
+
+        // Simple Autocorrelation algorithm to find pitch
+        function autoCorrelate(buffer, sampleRate) {
+            let SIZE = buffer.length;
+            let rms = 0;
+            for (let i = 0; i < SIZE; i++) {
+                rms += buffer[i] * buffer[i];
+            }
+            if (Math.sqrt(rms / SIZE) < 0.01) return -1; // Too quiet
+
+            let r1 = 0, r2 = SIZE - 1, thres = 0.2;
+            for (let i = 0; i < SIZE / 2; i++) {
+                if (Math.abs(buffer[i]) < thres) { r1 = i; break; }
+            }
+            for (let i = 1; i < SIZE / 2; i++) {
+                if (Math.abs(buffer[SIZE - i]) < thres) { r2 = SIZE - i; break; }
+            }
+
+            buffer = buffer.slice(r1, r2);
+            SIZE = buffer.length;
+
+            let c = new Array(SIZE).fill(0);
+            for (let i = 0; i < SIZE; i++) {
+                for (let j = 0; j < SIZE - i; j++) {
+                    c[i] = c[i] + buffer[j] * buffer[j + i];
+                }
+            }
+
+            let d = 0;
+            while (c[d] > c[d + 1]) d++;
+            let maxval = -1, maxpos = -1;
+            for (let i = d; i < SIZE; i++) {
+                if (c[i] > maxval) {
+                    maxval = c[i];
+                    maxpos = i;
+                }
+            }
+            let T0 = maxpos;
+            return sampleRate / T0;
         }
     </script>
-
 </body>
 </html>
-
