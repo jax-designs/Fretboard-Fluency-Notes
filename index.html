@@ -1,138 +1,100 @@
 <!DOCTYPE html>
 <html>
 <head>
+    <title>Fretboard Blitz</title>
     <style>
+        /* Keeping it super clean for practice */
         body { 
-            display: flex; 
-            flex-direction: column; 
-            align-items: center; 
-            justify-content: center; 
-            height: 100vh; 
-            margin: 0; 
-            font-family: sans-serif; 
-            text-align: center;
-            background-color: #f0f0f0;
+            background: #fafafa;
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            color: #222;
         }
-        #display { 
-            font-size: 100px; 
+
+        #display { font-size: 160px; font-weight: 900; margin: 0; }
+        #string-display { font-size: 50px; color: #555; margin-bottom: 40px; }
+
+        .stats { font-size: 20px; color: #999; text-transform: uppercase; letter-spacing: 2px; }
+        #startBtn { 
+            padding: 20px 40px; 
+            font-size: 20px; 
             font-weight: bold; 
-            margin-bottom: 10px; 
-        }
-        #string-display {
-            font-size: 50px;
-            color: #444;
-            margin-bottom: 30px;
-        }
-        #currentNote { 
-            font-size: 30px; 
-            color: #888; 
-        }
-        button { 
-            font-size: 24px; 
-            padding: 15px 30px; 
-            cursor: pointer; 
+            cursor: pointer;
+            border: 3px solid #222;
+            background: transparent;
         }
     </style>
 </head>
 <body>
 
-    <div id="display">Press Start</div>
-    <div id="string-display"></div>
-    <div id="currentNote">Detected: -</div>
-    <br>
-    <button id="startBtn" onclick="initAudio()">Start Listening</button>
+    <div id="display">START</div>
+    <div id="string-display">ready when you are</div>
+    
+    <div class="stats">
+        Current: <span id="tally">0</span> &nbsp; | &nbsp; Best: <span id="best">0</span>
+    </div>
+
+    <br><br>
+    <button id="startBtn">CLICKS TO START</button>
 
     <script>
-        const notes = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
-        const strings = ["1st String", "2nd String", "3rd String", "4th String", "5th String", "6th String"];
+        // --- Setup & Constants ---
+        const noteList = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+        const stringList = ["1st String (e)", "2nd String (B)", "3rd String (G)", "4th String (D)", "5th String (A)", "6th String (E)"];
         
-        let targetNote = "";
-        let audioContext, analyser, dataArray;
-        let isListening = false;
-        let matchStartTime = null;
-        const requiredHoldTime = 250; 
+        let goalNote = "";
+        let audioCtx, micAnalyser, data;
+        let running = false;
+        
+        // Scoring stuff
+        let count = 0;
+        let high = localStorage.getItem("fret_rank") || 0;
+        document.getElementById('best').innerText = high;
 
-        function nextChallenge() {
-            let newNote;
-            // Loop until we get a note that isn't the current one
+        // Timing config
+        let holdStarted = null;
+        const requiredHold = 250; // 1/4 second felt best in testing
+
+        // --- Logic ---
+
+        function pickNewNote() {
+            let next;
+            // Make sure we don't get the same note twice in a row (annoying)
             do {
-                newNote = notes[Math.floor(Math.random() * notes.length)];
-            } while (newNote === targetNote);
+                next = noteList[Math.floor(Math.random() * noteList.length)];
+            } while (next === goalNote);
 
-            targetNote = newNote;
-            const randomString = strings[Math.floor(Math.random() * strings.length)];
+            goalNote = next;
+            const randString = stringList[Math.floor(Math.random() * stringList.length)];
             
-            document.getElementById('display').innerText = targetNote;
-            document.getElementById('string-display').innerText = randomString;
-            matchStartTime = null;
+            document.getElementById('display').innerText = goalNote;
+            document.getElementById('string-display').innerText = randString;
+            holdStarted = null; // reset timer
         }
 
-        async function initAudio() {
-            if (isListening) return;
-            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        function scorePoint() {
+            count++;
+            document.getElementById('tally').innerText = count;
+            
+            if (count > high) {
+                high = count;
+                document.getElementById('best').innerText = high;
+                localStorage.setItem("fret_rank", high);
+            }
+        }
+
+        async function start() {
+            if (running) return;
+            
+            // Need user interaction to start AudioContext in most browsers
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            const source = audioContext.createMediaStreamSource(stream);
+            const source = audioCtx.createMediaStreamSource(stream);
             
-            analyser = audioContext.createAnalyser();
-            analyser.fftSize = 4096; 
-            source.connect(analyser);
-            
-            dataArray = new Float32Array(analyser.fftSize);
-            isListening = true;
-            document.getElementById('startBtn').style.display = "none";
-            nextChallenge();
-            updatePitch();
-        }
-
-        function updatePitch() {
-            analyser.getFloatTimeDomainData(dataArray);
-            let freq = autoCorrelate(dataArray, audioContext.sampleRate);
-            let noteFound = freq !== -1 ? getNoteFromFrequency(freq) : "-";
-            
-            document.getElementById('currentNote').innerText = `Detected: ${noteFound}`;
-
-            if (noteFound === targetNote) {
-                if (!matchStartTime) {
-                    matchStartTime = Date.now();
-                } else if (Date.now() - matchStartTime >= requiredHoldTime) {
-                    nextChallenge();
-                }
-            } else {
-                if (noteFound !== "-") {
-                    matchStartTime = null;
-                }
-            }
-            requestAnimationFrame(updatePitch);
-        }
-
-        function getNoteFromFrequency(frequency) {
-            const n = Math.round(12 * Math.log2(frequency / 440)) + 69;
-            return notes[n % 12];
-        }
-
-        function autoCorrelate(buffer, sampleRate) {
-            let SIZE = buffer.length;
-            let rms = 0;
-            for (let i = 0; i < SIZE; i++) rms += buffer[i] * buffer[i];
-            if (Math.sqrt(rms / SIZE) < 0.005) return -1;
-
-            let c = new Array(SIZE).fill(0);
-            for (let i = 0; i < SIZE; i++) {
-                for (let j = 0; j < SIZE - i; j++) {
-                    c[i] = c[i] + buffer[j] * buffer[j + i];
-                }
-            }
-            let d = 0;
-            while (c[d] > c[d + 1]) d++;
-            let maxval = -1, maxpos = -1;
-            for (let i = d; i < SIZE; i++) {
-                if (c[i] > maxval) {
-                    maxval = c[i];
-                    maxpos = i;
-                }
-            }
-            return sampleRate / maxpos;
-        }
-    </script>
-</body>
-</html>
+            micAnalyser = audioCtx.createAnalyser();
+            micAnalyser.fftSize = 40
