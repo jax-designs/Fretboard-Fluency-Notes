@@ -14,61 +14,131 @@
             background-color: #f0f0f0;
         }
         #display { 
+            font-size: 150px; 
             font-size: 100px; 
             font-weight: bold; 
+            line-height: 1;
             margin-bottom: 10px; 
         }
         #string-display {
+            font-size: 60px;
             font-size: 50px;
             color: #444;
+            margin-top: 10px;
             margin-bottom: 30px;
         }
-        #score-display {
+        #score-container {
+            margin-top: 50px;
             font-size: 24px;
             color: #666;
-            margin-top: 20px;
-        }
-        #leaderboard {
-            margin-top: 30px;
-            font-size: 18px;
-            color: #888;
-            border-top: 1px solid #ccc;
-            padding-top: 10px;
+        #currentNote { 
+            font-size: 30px; 
+            color: #888; 
         }
         button { 
             font-size: 24px; 
-            padding: 15px 30px; 
-            cursor: pointer; 
-        }
-    </style>
+@@ -37,15 +36,11 @@
 </head>
 <body>
 
+    <div id="display">READY?</div>
     <div id="display">Press Start</div>
     <div id="string-display"></div>
     
-    <div id="score-display">
-        Current Session: <span id="currentScore">0</span>
+    <div id="score-container">
+        Score: <span id="currentScore">0</span> | High Score: <span id="highScore">0</span>
     </div>
 
-    <div id="leaderboard">
-        <strong>TOP SCORES</strong><br>
-        <span id="scoreList">No scores yet</span>
-    </div>
-
+    <div id="currentNote">Detected: -</div>
     <br>
+    <button id="startBtn" onclick="initAudio()">START</button>
     <button id="startBtn" onclick="initAudio()">Start Listening</button>
 
     <script>
         const notes = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
-        const strings = ["1st String", "2nd String", "3rd String", "4th String", "5th String", "6th String"];
-        
-        let targetNote = "";
-        let audioCtx, analyser, dataArray;
-        let active = false;
-        
-        let score = 0;
-        let matchTime = null;
-        const holdThreshold = 250; 
+@@ -57,13 +52,9 @@
+        let matchStartTime = null;
+        const requiredHoldTime = 250; 
 
-        // Load leaderboard on startup
+        // Score Tracking
+        let score = 0;
+        let highscore = localStorage.getItem("guitarHighScore") || 0;
+        document.getElementById('highScore').innerText = highscore;
+
+        function nextChallenge() {
+            let newNote;
+            // Loop until we get a note that isn't the current one
+            do {
+                newNote = notes[Math.floor(Math.random() * notes.length)];
+            } while (newNote === targetNote);
+@@ -76,17 +67,6 @@
+            matchStartTime = null;
+        }
+
+        function updateScore() {
+            score++;
+            document.getElementById('currentScore').innerText = score;
+            
+            if (score > highscore) {
+                highscore = score;
+                document.getElementById('highScore').innerText = highscore;
+                localStorage.setItem("guitarHighScore", highscore);
+            }
+        }
+
+        async function initAudio() {
+            if (isListening) return;
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+@@ -108,50 +88,51 @@
+            analyser.getFloatTimeDomainData(dataArray);
+            let freq = autoCorrelate(dataArray, audioContext.sampleRate);
+            let noteFound = freq !== -1 ? getNoteFromFrequency(freq) : "-";
+            
+            document.getElementById('currentNote').innerText = `Detected: ${noteFound}`;
+
+            if (noteFound === targetNote) {
+                if (!matchStartTime) {
+                    matchStartTime = Date.now();
+                } else if (Date.now() - matchStartTime >= requiredHoldTime) {
+                    updateScore(); // Increment score
+                    nextChallenge();
+                }
+            } else {
+                if (noteFound !== "-") {
+                    matchStartTime = null;
+                }
+            }
+            requestAnimationFrame(updatePitch);
+        }
+
+        function getNoteFromFrequency(frequency) {
+            const n = Math.round(12 * Math.log2(frequency / 440)) + 69;
+            return notes[n % 12];
+        }
+
+        function autoCorrelate(buffer, sampleRate) {
+            let SIZE = buffer.length;
+            let rms = 0;
+            for (let i = 0; i < SIZE; i++) rms += buffer[i] * buffer[i];
+            if (Math.sqrt(rms / SIZE) < 0.005) return -1;
+
+            let c = new Array(SIZE).fill(0);
+            for (let i = 0; i < SIZE; i++) {
+                for (let j = 0; j < SIZE - i; j++) {
+                    c[i] = c[i] + buffer[j] * buffer[j + i];
+                }
+            }
+            let d = 0;
+            while (c[d] > c[d + 1]) d++;
+            let maxval = -1, maxpos = -1;
+            for (let i = d; i < SIZE; i++) {
+                if (c[i] > maxval) {
+                    maxval = c[i];
+                    maxpos = i;
+                }
+            }
+            return sampleRate / maxpos;
+        }
+    </script>
+</body>
+</html>
