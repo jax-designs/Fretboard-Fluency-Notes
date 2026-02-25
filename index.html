@@ -14,124 +14,142 @@
             background-color: #f0f0f0;
         }
         #display { 
-            font-size: 150px; 
             font-size: 100px; 
             font-weight: bold; 
-            line-height: 1;
             margin-bottom: 10px; 
         }
         #string-display {
-            font-size: 60px;
             font-size: 50px;
             color: #444;
-            margin-top: 10px;
             margin-bottom: 30px;
         }
-        #score-container {
-            margin-top: 50px;
+        #score-display {
             font-size: 24px;
             color: #666;
-        #currentNote { 
-            font-size: 30px; 
-            color: #888; 
+            margin-top: 20px;
         }
         button { 
             font-size: 24px; 
-@@ -37,15 +36,11 @@
+            padding: 15px 30px; 
+            cursor: pointer; 
+        }
+    </style>
 </head>
 <body>
 
-    <div id="display">READY?</div>
     <div id="display">Press Start</div>
     <div id="string-display"></div>
     
-    <div id="score-container">
-        Score: <span id="currentScore">0</span> | High Score: <span id="highScore">0</span>
+    <div id="score-display">
+        Score: <span id="currentScore">0</span> | Best: <span id="highScore">0</span>
     </div>
 
-    <div id="currentNote">Detected: -</div>
     <br>
-    <button id="startBtn" onclick="initAudio()">START</button>
     <button id="startBtn" onclick="initAudio()">Start Listening</button>
 
     <script>
+        // --- App State ---
         const notes = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
-@@ -57,13 +52,9 @@
-        let matchStartTime = null;
-        const requiredHoldTime = 250; 
-
-        // Score Tracking
+        const strings = ["1st String", "2nd String", "3rd String", "4th String", "5th String", "6th String"];
+        
+        let targetNote = "";
+        let audioCtx, analyser, dataArray;
+        let active = false;
+        
+        // Scoring & Persistence
         let score = 0;
-        let highscore = localStorage.getItem("guitarHighScore") || 0;
+        let highscore = localStorage.getItem("fretboard_top_score") || 0;
         document.getElementById('highScore').innerText = highscore;
 
+        // Timing
+        let matchTime = null;
+        const holdThreshold = 250; // 0.25 seconds
+
         function nextChallenge() {
-            let newNote;
-            // Loop until we get a note that isn't the current one
+            let next;
+            // Loop to prevent immediate duplicates
             do {
-                newNote = notes[Math.floor(Math.random() * notes.length)];
-            } while (newNote === targetNote);
-@@ -76,17 +67,6 @@
-            matchStartTime = null;
+                next = notes[Math.floor(Math.random() * notes.length)];
+            } while (next === targetNote);
+
+            targetNote = next;
+            const randString = strings[Math.floor(Math.random() * strings.length)];
+            
+            document.getElementById('display').innerText = targetNote;
+            document.getElementById('string-display').innerText = randString;
+            matchTime = null; 
         }
 
-        function updateScore() {
+        function handleWin() {
             score++;
             document.getElementById('currentScore').innerText = score;
             
             if (score > highscore) {
                 highscore = score;
                 document.getElementById('highScore').innerText = highscore;
-                localStorage.setItem("guitarHighScore", highscore);
+                localStorage.setItem("fretboard_top_score", highscore);
             }
+            nextChallenge();
         }
 
         async function initAudio() {
-            if (isListening) return;
-            audioContext = new (window.AudioContext || window.webkitAudioContext)();
-@@ -108,50 +88,51 @@
-            analyser.getFloatTimeDomainData(dataArray);
-            let freq = autoCorrelate(dataArray, audioContext.sampleRate);
-            let noteFound = freq !== -1 ? getNoteFromFrequency(freq) : "-";
+            if (active) return;
             
-            document.getElementById('currentNote').innerText = `Detected: ${noteFound}`;
-
-            if (noteFound === targetNote) {
-                if (!matchStartTime) {
-                    matchStartTime = Date.now();
-                } else if (Date.now() - matchStartTime >= requiredHoldTime) {
-                    updateScore(); // Increment score
-                    nextChallenge();
-                }
-            } else {
-                if (noteFound !== "-") {
-                    matchStartTime = null;
-                }
-            }
-            requestAnimationFrame(updatePitch);
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const source = audioCtx.createMediaStreamSource(stream);
+            
+            analyser = audioCtx.createAnalyser();
+            analyser.fftSize = 4096; 
+            source.connect(analyser);
+            
+            dataArray = new Float32Array(analyser.fftSize);
+            active = true;
+            
+            document.getElementById('startBtn').style.display = "none";
+            nextChallenge();
+            process();
         }
 
-        function getNoteFromFrequency(frequency) {
-            const n = Math.round(12 * Math.log2(frequency / 440)) + 69;
-            return notes[n % 12];
+        function process() {
+            analyser.getFloatTimeDomainData(dataArray);
+            let freq = autoCorrelate(dataArray, audioCtx.sampleRate);
+            
+            let heard = "-";
+            if (freq !== -1) {
+                const n = Math.round(12 * Math.log2(freq / 440)) + 69;
+                heard = notes[n % 12];
+            }
+
+            if (heard === targetNote) {
+                if (!matchTime) {
+                    matchTime = Date.now();
+                } else if (Date.now() - matchTime >= holdThreshold) {
+                    handleWin();
+                }
+            } else if (heard !== "-") {
+                // Reset if they hit the wrong note entirely
+                matchTime = null;
+            }
+
+            requestAnimationFrame(process);
         }
 
         function autoCorrelate(buffer, sampleRate) {
-            let SIZE = buffer.length;
-            let rms = 0;
-            for (let i = 0; i < SIZE; i++) rms += buffer[i] * buffer[i];
-            if (Math.sqrt(rms / SIZE) < 0.005) return -1;
+            let total = 0;
+            for (let i = 0; i < buffer.length; i++) total += buffer[i] * buffer[i];
+            if (Math.sqrt(total / buffer.length) < 0.005) return -1;
 
-            let c = new Array(SIZE).fill(0);
-            for (let i = 0; i < SIZE; i++) {
-                for (let j = 0; j < SIZE - i; j++) {
+            let c = new Array(buffer.length).fill(0);
+            for (let i = 0; i < buffer.length; i++) {
+                for (let j = 0; j < buffer.length - i; j++) {
                     c[i] = c[i] + buffer[j] * buffer[j + i];
                 }
             }
             let d = 0;
             while (c[d] > c[d + 1]) d++;
             let maxval = -1, maxpos = -1;
-            for (let i = d; i < SIZE; i++) {
+            for (let i = d; i < buffer.length; i++) {
                 if (c[i] > maxval) {
                     maxval = c[i];
                     maxpos = i;
